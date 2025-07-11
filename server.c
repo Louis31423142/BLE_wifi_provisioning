@@ -216,7 +216,8 @@ int main() {
         sleep_ms(5000);
     }
 
-    printf("succesful connection!");
+    printf("succesful connection!\n");
+
 
 #endif
     return 0;
