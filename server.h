@@ -10,7 +10,8 @@
 
 extern int le_notification_enabled;
 extern hci_con_handle_t con_handle;
-extern uint16_t current_state;
+extern uint8_t ssid;
+extern uint8_t password;
 extern uint8_t const profile_data[];
 
 

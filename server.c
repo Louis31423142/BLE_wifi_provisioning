@@ -14,6 +14,9 @@
 #include "hardware/gpio.h"
 
 
+
+
+
 #define HEARTBEAT_PERIOD_MS 1000
 #define APP_AD_FLAGS 0x06
 
@@ -29,7 +32,13 @@ static const uint8_t adv_data_len = sizeof(adv_data);
 
 int le_notification_enabled;
 hci_con_handle_t con_handle;
-uint16_t current_state;
+uint8_t ssid;
+uint8_t password;
+
+char ssid_word[32];
+char password_word[32];
+
+bool connection_status;
 
 
 static btstack_timer_source_t heartbeat;
@@ -65,7 +74,8 @@ void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint
             le_notification_enabled = 0;
             break;
         case ATT_EVENT_CAN_SEND_NOW:
-            att_server_notify(con_handle, ATT_CHARACTERISTIC_b1829813_e8ec_4621_b9b5_6c1be43fe223_01_VALUE_HANDLE, (uint8_t*)&current_state, sizeof(current_state));
+            att_server_notify(con_handle, ATT_CHARACTERISTIC_b1829813_e8ec_4621_b9b5_6c1be43fe223_01_VALUE_HANDLE, (uint8_t*)&ssid, sizeof(ssid));
+            att_server_notify(con_handle, ATT_CHARACTERISTIC_410f5077_9e81_4f3b_b888_bf435174fa58_01_VALUE_HANDLE, (uint8_t*)&password, sizeof(password));
             break;
         
         default:
@@ -76,9 +86,16 @@ void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint
 uint16_t att_read_callback(hci_con_handle_t connection_handle, uint16_t att_handle, uint16_t offset, uint8_t * buffer, uint16_t buffer_size) {
     UNUSED(connection_handle);
 
+    // SSID read callbaclk
     if (att_handle == ATT_CHARACTERISTIC_b1829813_e8ec_4621_b9b5_6c1be43fe223_01_VALUE_HANDLE){
-        return att_read_callback_handle_blob((const uint8_t *)&current_state, sizeof(current_state), offset, buffer, buffer_size);
+        return att_read_callback_handle_blob((const uint8_t *)&ssid, sizeof(ssid), offset, buffer, buffer_size);
     }
+
+    // Password read callback
+    if (att_handle == ATT_CHARACTERISTIC_410f5077_9e81_4f3b_b888_bf435174fa58_01_VALUE_HANDLE){
+        return att_read_callback_handle_blob((const uint8_t *)&password, sizeof(password), offset, buffer, buffer_size);
+    }
+
     return 0;
 }
 
@@ -99,16 +116,8 @@ int att_write_callback(hci_con_handle_t connection_handle, uint16_t att_handle, 
     // First characteristic (SSID)
     if (att_handle == ATT_CHARACTERISTIC_b1829813_e8ec_4621_b9b5_6c1be43fe223_01_VALUE_HANDLE){
         att_server_request_can_send_now_event(con_handle);
-
         printf("event2\n");
-
-        int i;
-        for (i=0; i<5; i++) {
-            printf("%c", *(buffer+i));
-            printf("\n");
-        }
-
-
+        memcpy(ssid_word, buffer, buffer_size);
         //This occurs when the client sends a write request to the ssid characteristic (up arrow on nrf scanner)
 
     }
@@ -116,29 +125,14 @@ int att_write_callback(hci_con_handle_t connection_handle, uint16_t att_handle, 
     // Second characteristic (Password)
     if (att_handle == ATT_CHARACTERISTIC_410f5077_9e81_4f3b_b888_bf435174fa58_01_VALUE_HANDLE){
         att_server_request_can_send_now_event(con_handle);
-
-        printf("event2\n");
-        
-        int i;
-        for (i=0; i<5; i++) {
-            printf("%c", *(buffer+i));
-            printf("\n");
-        }
+        printf("event3\n");
+        memcpy(password_word, buffer, buffer_size);
         //This occurs when the client sends a write request to the password characteristic (up arrow on nrf scanner)
 
     }
 
 
     return 0;
-}
-
-
-void button_irq_handler(uint gpio, uint32_t events) {
-    current_state = gpio_get(gpio);
-    printf("IRQ: current state %d\n", current_state);
-    if (le_notification_enabled) {
-        att_server_request_can_send_now_event(con_handle);
-    }
 }
 
 
@@ -159,21 +153,15 @@ static void heartbeat_handler(struct btstack_timer_source *ts) {
 int main() {
     stdio_init_all();
 
-    const uint button = 15;
-    gpio_init(button);
-    gpio_set_dir(button, GPIO_IN);
-    gpio_pull_up(button);
-    gpio_set_irq_enabled_with_callback(button, GPIO_IRQ_EDGE_FALL | GPIO_IRQ_EDGE_RISE, true, &button_irq_handler);
-
     // initialize CYW43 driver architecture (will enable BT if/because CYW43_ENABLE_BLUETOOTH == 1)
     if (cyw43_arch_init()) {
         printf("failed to initialise cyw43_arch\n");
         return -1;
     }
 
-
     l2cap_init();
     sm_init();
+
 
     att_server_init(profile_data, att_read_callback, att_write_callback);    
 
@@ -191,6 +179,8 @@ int main() {
 
     // turn on bluetooth!
     hci_power_control(HCI_POWER_ON);
+
+
     
     // btstack_run_loop_execute is only required when using the 'polling' method (e.g. using pico_cyw43_arch_poll library).
     // This example uses the 'threadsafe background` method, where BT work is handled in a low priority IRQ, so it
@@ -202,10 +192,32 @@ int main() {
     // this core is free to do it's own stuff except when using 'polling' method (in which case you should use 
     // btstacK_run_loop_ methods to add work to the run loop.
     
-    // this is a forever loop in place of where user code would go.
-    while(true) {      
+
+
+    //wait for both credentials to be passed before attempting connection
+    while ((strcmp(ssid_word, "") == 0) || (strcmp(password_word, "") == 0)) {
         sleep_ms(1000);
+        printf("%s\n", ssid_word);
+        printf("%s\n", password_word);
     }
+
+    //start trying to connect to wifi with BLE credentials
+    cyw43_arch_enable_sta_mode();
+    printf("connection begin");
+
+    //repeatedly try to connect 
+    while (connection_status == false) {
+        if (cyw43_arch_wifi_connect_timeout_ms(ssid_word, password_word, CYW43_AUTH_WPA2_AES_PSK, 5000)) { 
+            printf("failed to connect.\n");
+        } else {
+            printf("Connected.\n");
+            connection_status = true;
+        }
+        sleep_ms(5000);
+    }
+
+    printf("succesful connection!");
+
 #endif
     return 0;
 }
