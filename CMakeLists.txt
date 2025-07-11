@@ -28,7 +28,7 @@ set(PICO_BOARD pico2_w CACHE STRING "Board type")
 # Pull in Raspberry Pi Pico SDK (must be before project)
 include(pico_sdk_import.cmake)
 
-project(picow_ble_doorbell_tx C CXX ASM)
+project(wifi_provisioning_new C CXX ASM)
 
 
 # Initialise the Raspberry Pi Pico SDK
@@ -38,19 +38,19 @@ pico_sdk_init()
 
 # Standalone example that reads from the on board temperature sensor and sends notifications via BLE
 # Flashes slowly each second to show it's running
-add_executable(picow_ble_doorbell_tx
+add_executable(wifi_provisioning_new
     server.c 
     )
-target_link_libraries(picow_ble_doorbell_tx
+target_link_libraries(wifi_provisioning_new
     pico_stdlib
     pico_btstack_ble
     pico_btstack_cyw43
     pico_cyw43_arch_none
     )
-target_include_directories(picow_ble_doorbell_tx PRIVATE
+target_include_directories(wifi_provisioning_new PRIVATE
     ${CMAKE_CURRENT_LIST_DIR} # For btstack config
     )
-pico_btstack_make_gatt_header(picow_ble_doorbell_tx PRIVATE "${CMAKE_CURRENT_LIST_DIR}/doorbell.gatt")
+pico_btstack_make_gatt_header(wifi_provisioning_new PRIVATE "${CMAKE_CURRENT_LIST_DIR}/provisioning.gatt")
 
-pico_add_extra_outputs(picow_ble_doorbell_tx)
+pico_add_extra_outputs(wifi_provisioning_new)
 

@@ -9,7 +9,7 @@
 #include "pico/cyw43_arch.h"
 #include "pico/btstack_cyw43.h"
 #include "pico/stdlib.h"
-#include "doorbell.h"
+#include "provisioning.h"
 #include "server.h"
 #include "hardware/gpio.h"
 
@@ -22,7 +22,7 @@ static uint8_t adv_data[] = {
     0x02, BLUETOOTH_DATA_TYPE_FLAGS, APP_AD_FLAGS,
     // Name
     0x17, BLUETOOTH_DATA_TYPE_COMPLETE_LOCAL_NAME, 'P', 'i', 'c', 'o', ' ', '0', '0', ':', '0', '0', ':', '0', '0', ':', '0', '0', ':', '0', '0', ':', '0', '0',
-    0x03, BLUETOOTH_DATA_TYPE_COMPLETE_LIST_OF_16_BIT_SERVICE_CLASS_UUIDS, 0x3b, 0x18,
+    0x03, BLUETOOTH_DATA_TYPE_COMPLETE_LIST_OF_16_BIT_SERVICE_CLASS_UUIDS, 0x10, 0xFF,
 };
 
 static const uint8_t adv_data_len = sizeof(adv_data);
@@ -65,8 +65,9 @@ void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint
             le_notification_enabled = 0;
             break;
         case ATT_EVENT_CAN_SEND_NOW:
-            att_server_notify(con_handle, ATT_CHARACTERISTIC_ORG_BLUETOOTH_CHARACTERISTIC_DIGITAL_OUTPUT_01_VALUE_HANDLE, (uint8_t*)&current_state, sizeof(current_state));
+            att_server_notify(con_handle, ATT_CHARACTERISTIC_b1829813_e8ec_4621_b9b5_6c1be43fe223_01_VALUE_HANDLE, (uint8_t*)&current_state, sizeof(current_state));
             break;
+        
         default:
             break;
     }
@@ -75,7 +76,7 @@ void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint
 uint16_t att_read_callback(hci_con_handle_t connection_handle, uint16_t att_handle, uint16_t offset, uint8_t * buffer, uint16_t buffer_size) {
     UNUSED(connection_handle);
 
-    if (att_handle == ATT_CHARACTERISTIC_ORG_BLUETOOTH_CHARACTERISTIC_DIGITAL_OUTPUT_01_VALUE_HANDLE){
+    if (att_handle == ATT_CHARACTERISTIC_b1829813_e8ec_4621_b9b5_6c1be43fe223_01_VALUE_HANDLE){
         return att_read_callback_handle_blob((const uint8_t *)&current_state, sizeof(current_state), offset, buffer, buffer_size);
     }
     return 0;
@@ -86,12 +87,48 @@ int att_write_callback(hci_con_handle_t connection_handle, uint16_t att_handle, 
     UNUSED(offset);
     UNUSED(buffer_size);
     
-    if (att_handle != ATT_CHARACTERISTIC_ORG_BLUETOOTH_CHARACTERISTIC_DIGITAL_OUTPUT_01_CLIENT_CONFIGURATION_HANDLE) return 0;
+ 
     le_notification_enabled = little_endian_read_16(buffer, 0) == GATT_CLIENT_CHARACTERISTICS_CONFIGURATION_NOTIFICATION;
     con_handle = connection_handle;
     if (le_notification_enabled) {
         att_server_request_can_send_now_event(con_handle);
+        printf("event1\n");
+        //This occurs when the client enables notification (the download button on nrf scanner)
     }
+
+    // First characteristic (SSID)
+    if (att_handle == ATT_CHARACTERISTIC_b1829813_e8ec_4621_b9b5_6c1be43fe223_01_VALUE_HANDLE){
+        att_server_request_can_send_now_event(con_handle);
+
+        printf("event2\n");
+
+        int i;
+        for (i=0; i<5; i++) {
+            printf("%c", *(buffer+i));
+            printf("\n");
+        }
+
+
+        //This occurs when the client sends a write request to the ssid characteristic (up arrow on nrf scanner)
+
+    }
+
+    // Second characteristic (Password)
+    if (att_handle == ATT_CHARACTERISTIC_410f5077_9e81_4f3b_b888_bf435174fa58_01_VALUE_HANDLE){
+        att_server_request_can_send_now_event(con_handle);
+
+        printf("event2\n");
+        
+        int i;
+        for (i=0; i<5; i++) {
+            printf("%c", *(buffer+i));
+            printf("\n");
+        }
+        //This occurs when the client sends a write request to the password characteristic (up arrow on nrf scanner)
+
+    }
+
+
     return 0;
 }
 
@@ -126,7 +163,7 @@ int main() {
     gpio_init(button);
     gpio_set_dir(button, GPIO_IN);
     gpio_pull_up(button);
-    gpio_set_irq_enabled_with_callback(button, GPIO_IRQ_EDGE_FALL, true, &button_irq_handler);
+    gpio_set_irq_enabled_with_callback(button, GPIO_IRQ_EDGE_FALL | GPIO_IRQ_EDGE_RISE, true, &button_irq_handler);
 
     // initialize CYW43 driver architecture (will enable BT if/because CYW43_ENABLE_BLUETOOTH == 1)
     if (cyw43_arch_init()) {
