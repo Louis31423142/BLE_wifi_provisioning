@@ -24,10 +24,10 @@ uint8_t ssid;
 uint8_t password;
 
 // max lengths of credentials + 1 to ensure null termination
-char ssid_word[33];
-char password_word[64];
+char ssid_word[33] = "";
+char password_word[64] = "";
 
-bool connection_status;
+bool connection_status = false;
 
 static btstack_timer_source_t heartbeat;
 static btstack_packet_callback_registration_t hci_event_callback_registration;
@@ -265,6 +265,7 @@ int main() {
         return -1;
     }
 
+
     l2cap_init();
     sm_init();
 
@@ -285,6 +286,55 @@ int main() {
     // turn on bluetooth!
     hci_power_control(HCI_POWER_ON);
 
+
+
+    read_credentials();
+    printf("The saved value of ssid is: %s\n", ssid_word);
+    printf("The saved value of password is: %s\n", password_word);
+
+    cyw43_arch_disable_sta_mode();
+    if (cyw43_arch_wifi_connect_timeout_ms(ssid_word, password_word, CYW43_AUTH_WPA2_AES_PSK, 10000)) { 
+        printf("failed to connect with saved credentials \n");
+    } else {
+        printf("Connected.\n");
+        connection_status = true;
+    }
+
+    // If this fails, flash LED, wait for user to provision credentials over BLE
+    if (connection_status == false) {
+        cyw43_arch_disable_sta_mode();
+        //wait for both credentials to be passed before attempting connection
+        while ((strcmp(ssid_word, "") == 0) || (strcmp(password_word, "") == 0)) {
+            sleep_ms(1000);
+            printf("%s\n", ssid_word);
+            printf("%s\n", password_word);
+        }
+
+        // once credentials passed, repeatedly try to connect 
+        while (connection_status == false) {
+            cyw43_arch_enable_sta_mode();
+            if (cyw43_arch_wifi_connect_timeout_ms(ssid_word, password_word, CYW43_AUTH_WPA2_AES_PSK, 5000)) { 
+                printf("failed to connect.\n");
+                printf("%s\n", ssid_word);
+                printf("%s\n", password_word);
+                read_credentials();
+            } else {
+                printf("Connected.\n");
+                connection_status = true;
+                // since we have succesfully connected with these credentials, write to flash
+                save_credentials(ssid_word, password_word);
+            }
+            sleep_ms(5000);
+        }
+    }
+
+    printf("succesful connection!\n");
+    cyw43_arch_disable_sta_mode();
+
+
+
+
+
     // btstack_run_loop_execute is only required when using the 'polling' method (e.g. using pico_cyw43_arch_poll library).
     // This example uses the 'threadsafe background` method, where BT work is handled in a low priority IRQ, so it
     // is fine to call bt_stack_run_loop_execute() but equally you can continue executing user code.
@@ -292,44 +342,47 @@ int main() {
 #if 0 // btstack_run_loop_execute() is not required, so lets not use it
     btstack_run_loop_execute();
 #else
-    // this core is free to do it's own stuff except when using 'polling' method (in which case you should use 
-    // btstacK_run_loop_ methods to add work to the run loop.
-    
-    // BT fails without this break
-    sleep_ms(10000);
+    //enable wifi chip
+    //cyw43_arch_enable_sta_mode();
 
     // First read flash, and try to join wifi using these credentials
-    // If this fails, flash LED, wait for user to provision credentials over BLE
-    // If credentials succesful, save to flash for future use
 
-    save_credentials("Eldub", "Helloooo");
+    /*
     read_credentials();
     printf("The saved value of ssid is: %s\n", ssid_word);
     printf("The saved value of password is: %s\n", password_word);
-
-    //wait for both credentials to be passed before attempting connection
-    while ((strcmp(ssid_word, "") == 0) || (strcmp(password_word, "") == 0)) {
-        sleep_ms(1000);
-        printf("%s\n", ssid_word);
-        printf("%s\n", password_word);
+    if (cyw43_arch_wifi_connect_timeout_ms(ssid_word, password_word, CYW43_AUTH_WPA2_AES_PSK, 10000)) { 
+        printf("failed to connect with saved credentials \n");
+    } else {
+        printf("Connected.\n");
+        connection_status = true;
     }
-
-    //start trying to connect to wifi with BLE credentials
-    cyw43_arch_enable_sta_mode();
-    printf("connection begin");
-
-    //repeatedly try to connect 
-    while (connection_status == false) {
-        if (cyw43_arch_wifi_connect_timeout_ms(ssid_word, password_word, CYW43_AUTH_WPA2_AES_PSK, 5000)) { 
-            printf("failed to connect.\n");
-        } else {
-            printf("Connected.\n");
-            connection_status = true;
+    
+    // If this fails, flash LED, wait for user to provision credentials over BLE
+    if (connection_status == false) {
+        //wait for both credentials to be passed before attempting connection
+        while ((strcmp(ssid_word, "") == 0) || (strcmp(password_word, "") == 0)) {
+            sleep_ms(1000);
+            printf("%s\n", ssid_word);
+            printf("%s\n", password_word);
         }
-        sleep_ms(5000);
+
+        // once credentials passed, repeatedly try to connect 
+        while (connection_status == false) {
+            if (cyw43_arch_wifi_connect_timeout_ms(ssid_word, password_word, CYW43_AUTH_WPA2_AES_PSK, 5000)) { 
+                printf("failed to connect.\n");
+            } else {
+                printf("Connected.\n");
+                connection_status = true;
+                // since we have succesfully connected with these credentials, write to flash
+                save_credentials(ssid_word, password_word);
+            }
+            sleep_ms(5000);
+        }
     }
 
     printf("succesful connection!\n");
+    */
 
     while (true) {
         sleep_ms(1000);
