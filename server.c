@@ -45,7 +45,7 @@ static const uint8_t adv_data_len = sizeof(adv_data);
 
 // We're going to erase and reprogram a region 256k from the start of flash.
 // Once done, we can access this at XIP_BASE + 256k.
-#define FLASH_TARGET_OFFSET (256 * 1024)
+#define FLASH_TARGET_OFFSET (2000 * 1024)
 
 const uint8_t *flash_target_contents = (const uint8_t *) (XIP_BASE + FLASH_TARGET_OFFSET);
 
@@ -145,6 +145,7 @@ int att_write_callback(hci_con_handle_t connection_handle, uint16_t att_handle, 
     if (att_handle == ATT_CHARACTERISTIC_b1829813_e8ec_4621_b9b5_6c1be43fe223_01_VALUE_HANDLE){
         att_server_request_can_send_now_event(con_handle);
         printf("event2\n");
+        memcpy(ssid_word, 0, strlen(ssid_word));
         memcpy(ssid_word, buffer, buffer_size);
         //This occurs when the client sends a write request to the ssid characteristic (up arrow on nrf scanner)
     }
@@ -153,6 +154,7 @@ int att_write_callback(hci_con_handle_t connection_handle, uint16_t att_handle, 
     if (att_handle == ATT_CHARACTERISTIC_410f5077_9e81_4f3b_b888_bf435174fa58_01_VALUE_HANDLE){
         att_server_request_can_send_now_event(con_handle);
         printf("event3\n");
+        memcpy(password_word, 0, strlen(password_word));
         memcpy(password_word, buffer, buffer_size);
         //This occurs when the client sends a write request to the password characteristic (up arrow on nrf scanner)
     }
@@ -221,7 +223,7 @@ void save_credentials(char ssid[], char password[]) {
 }
 
 void read_credentials(void) {
-    //print_buf(flash_target_contents, FLASH_PAGE_SIZE);
+    print_buf(flash_target_contents, FLASH_PAGE_SIZE);
     uint counter = 0;
     uint ssid_len = 0;
     //initialise ssid and password as 1 bigger than max to ensure null termination
@@ -250,9 +252,13 @@ void read_credentials(void) {
         }
     }
     // update global ssid and password
-    printf("%s\n", ssid);
-    printf("%s\n", password);
+    // printf("%s\n", ssid);
+    // printf("%s\n", password);
+
+    memcpy(ssid_word, 0, strlen(ssid_word));
     memcpy(ssid_word, ssid, strlen(ssid));
+
+    memcpy(password_word, 0, strlen(password_word));
     memcpy(password_word, password, strlen(password));
 }
 
@@ -287,7 +293,6 @@ int main() {
     hci_power_control(HCI_POWER_ON);
 
 
-
     read_credentials();
     printf("The saved value of ssid is: %s\n", ssid_word);
     printf("The saved value of password is: %s\n", password_word);
@@ -317,7 +322,6 @@ int main() {
                 printf("failed to connect.\n");
                 printf("%s\n", ssid_word);
                 printf("%s\n", password_word);
-                read_credentials();
             } else {
                 printf("Connected.\n");
                 connection_status = true;
