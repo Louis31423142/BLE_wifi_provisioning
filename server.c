@@ -42,22 +42,11 @@ static uint8_t adv_data[] = {
 
 static const uint8_t adv_data_len = sizeof(adv_data);
 
-
 // We're going to erase and reprogram a region 256k from the start of flash.
-// Once done, we can access this at XIP_BASE + 256k.
+// Once done, we can access this at XIP_BASE + 2000k.
 #define FLASH_TARGET_OFFSET (2000 * 1024)
 
 const uint8_t *flash_target_contents = (const uint8_t *) (XIP_BASE + FLASH_TARGET_OFFSET);
-
-void print_buf(const uint8_t *buf, size_t len) {
-    for (size_t i = 0; i < len; ++i) {
-        printf("%02x", buf[i]);
-        if (i % 16 == 15)
-            printf("\n");
-        else
-            printf(" ");
-    }
-}
 
 // This function will be called when it's safe to call flash_range_erase
 static void call_flash_range_erase(void *param) {
@@ -71,8 +60,6 @@ static void call_flash_range_program(void *param) {
     const uint8_t *data = (const uint8_t *)((uintptr_t*)param)[1];
     flash_range_program(offset, data, FLASH_PAGE_SIZE);
 }
-
-
 
 void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size) {
     UNUSED(size);
@@ -188,7 +175,6 @@ void save_credentials(char ssid[], char password[]) {
     for (uint i = 0; i < ssid_len; i++) {
         int ascii = (int) ssid[i];
         flash_data[i] = ascii;
-        //printf("%d", ascii);
     }
 
     //next add password
@@ -197,35 +183,19 @@ void save_credentials(char ssid[], char password[]) {
         flash_data[i + ssid_len + 1] = ascii;
     }
 
-    printf("Created data:\n");
-    //print_buf(flash_data, FLASH_PAGE_SIZE);
-
-    // Note that a whole number of sectors must be erased at a time.
-    //printf("\nErasing target region...\n");
-
-    // Flash is "execute in place" and so will be in use when any code that is stored in flash runs, e.g. an interrupt handler
-    // or code running on a different core.
-    // Calling flash_range_erase or flash_range_program at the same time as flash is running code would cause a crash.
-    // flash_safe_execute disables interrupts and tries to cooperate with the other core to ensure flash is not in use
-    // See the documentation for flash_safe_execute and its assumptions and limitations
+    //now erase and then write flash
     int rc = flash_safe_execute(call_flash_range_erase, (void*)FLASH_TARGET_OFFSET, UINT32_MAX);
     hard_assert(rc == PICO_OK);
 
-    //printf("Done. Read back target region:\n");
-    //print_buf(flash_target_contents, FLASH_PAGE_SIZE);
-
-    //printf("\nProgramming target region...\n");
     uintptr_t params[] = { FLASH_TARGET_OFFSET, (uintptr_t)flash_data};
     rc = flash_safe_execute(call_flash_range_program, params, UINT32_MAX);
     hard_assert(rc == PICO_OK);
-    //printf("Done. Read back target region:\n");
-    //print_buf(flash_target_contents, FLASH_PAGE_SIZE);
 }
 
 void read_credentials(void) {
-    print_buf(flash_target_contents, FLASH_PAGE_SIZE);
     uint counter = 0;
     uint ssid_len = 0;
+
     //initialise ssid and password as 1 bigger than max to ensure null termination
     char ssid[32] = {0};
     char password[63] = {0};
@@ -252,9 +222,6 @@ void read_credentials(void) {
         }
     }
     // update global ssid and password
-    // printf("%s\n", ssid);
-    // printf("%s\n", password);
-
     memcpy(ssid_word, 0, strlen(ssid_word));
     memcpy(ssid_word, ssid, strlen(ssid));
 
@@ -270,7 +237,6 @@ int main() {
         printf("failed to initialise cyw43_arch\n");
         return -1;
     }
-
 
     l2cap_init();
     sm_init();
@@ -292,12 +258,10 @@ int main() {
     // turn on bluetooth!
     hci_power_control(HCI_POWER_ON);
 
-
     read_credentials();
-    printf("The saved value of ssid is: %s\n", ssid_word);
-    printf("The saved value of password is: %s\n", password_word);
 
-    cyw43_arch_disable_sta_mode();
+    // first attempt to connect using saved credentials
+    cyw43_arch_enable_sta_mode();
     if (cyw43_arch_wifi_connect_timeout_ms(ssid_word, password_word, CYW43_AUTH_WPA2_AES_PSK, 10000)) { 
         printf("failed to connect with saved credentials \n");
     } else {
@@ -305,17 +269,9 @@ int main() {
         connection_status = true;
     }
 
-    // If this fails, flash LED, wait for user to provision credentials over BLE
+    // If this fails, wait for user to provision credentials over BLE
     if (connection_status == false) {
         cyw43_arch_disable_sta_mode();
-        //wait for both credentials to be passed before attempting connection
-        while ((strcmp(ssid_word, "") == 0) || (strcmp(password_word, "") == 0)) {
-            sleep_ms(1000);
-            printf("%s\n", ssid_word);
-            printf("%s\n", password_word);
-        }
-
-        // once credentials passed, repeatedly try to connect 
         while (connection_status == false) {
             cyw43_arch_enable_sta_mode();
             if (cyw43_arch_wifi_connect_timeout_ms(ssid_word, password_word, CYW43_AUTH_WPA2_AES_PSK, 5000)) { 
@@ -325,19 +281,15 @@ int main() {
             } else {
                 printf("Connected.\n");
                 connection_status = true;
+
                 // since we have succesfully connected with these credentials, write to flash
                 save_credentials(ssid_word, password_word);
             }
-            sleep_ms(5000);
         }
     }
 
     printf("succesful connection!\n");
     cyw43_arch_disable_sta_mode();
-
-
-
-
 
     // btstack_run_loop_execute is only required when using the 'polling' method (e.g. using pico_cyw43_arch_poll library).
     // This example uses the 'threadsafe background` method, where BT work is handled in a low priority IRQ, so it
@@ -346,48 +298,6 @@ int main() {
 #if 0 // btstack_run_loop_execute() is not required, so lets not use it
     btstack_run_loop_execute();
 #else
-    //enable wifi chip
-    //cyw43_arch_enable_sta_mode();
-
-    // First read flash, and try to join wifi using these credentials
-
-    /*
-    read_credentials();
-    printf("The saved value of ssid is: %s\n", ssid_word);
-    printf("The saved value of password is: %s\n", password_word);
-    if (cyw43_arch_wifi_connect_timeout_ms(ssid_word, password_word, CYW43_AUTH_WPA2_AES_PSK, 10000)) { 
-        printf("failed to connect with saved credentials \n");
-    } else {
-        printf("Connected.\n");
-        connection_status = true;
-    }
-    
-    // If this fails, flash LED, wait for user to provision credentials over BLE
-    if (connection_status == false) {
-        //wait for both credentials to be passed before attempting connection
-        while ((strcmp(ssid_word, "") == 0) || (strcmp(password_word, "") == 0)) {
-            sleep_ms(1000);
-            printf("%s\n", ssid_word);
-            printf("%s\n", password_word);
-        }
-
-        // once credentials passed, repeatedly try to connect 
-        while (connection_status == false) {
-            if (cyw43_arch_wifi_connect_timeout_ms(ssid_word, password_word, CYW43_AUTH_WPA2_AES_PSK, 5000)) { 
-                printf("failed to connect.\n");
-            } else {
-                printf("Connected.\n");
-                connection_status = true;
-                // since we have succesfully connected with these credentials, write to flash
-                save_credentials(ssid_word, password_word);
-            }
-            sleep_ms(5000);
-        }
-    }
-
-    printf("succesful connection!\n");
-    */
-
     while (true) {
         sleep_ms(1000);
     }
