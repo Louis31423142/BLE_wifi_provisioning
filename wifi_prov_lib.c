@@ -10,7 +10,7 @@
 #include "pico/btstack_cyw43.h"
 #include "pico/stdlib.h"
 #include "provisioning.h"
-#include "server.h"
+#include "wifi_prov_lib.h"
 #include "hardware/gpio.h"
 #include "pico/flash.h"
 #include "hardware/flash.h"
@@ -229,7 +229,7 @@ void read_credentials(void) {
     memcpy(password_word, password, strlen(password));
 }
 
-int main() {
+int start_ble_wifi_provisioning(void) {
     stdio_init_all();
 
     // initialize CYW43 driver architecture (will enable BT if/because CYW43_ENABLE_BLUETOOTH == 1)
@@ -289,19 +289,5 @@ int main() {
     }
 
     printf("succesful connection!\n");
-    cyw43_arch_disable_sta_mode();
-
-    // btstack_run_loop_execute is only required when using the 'polling' method (e.g. using pico_cyw43_arch_poll library).
-    // This example uses the 'threadsafe background` method, where BT work is handled in a low priority IRQ, so it
-    // is fine to call bt_stack_run_loop_execute() but equally you can continue executing user code.
-
-#if 0 // btstack_run_loop_execute() is not required, so lets not use it
-    btstack_run_loop_execute();
-#else
-    while (true) {
-        sleep_ms(1000);
-    }
-
-#endif
     return 0;
 }
