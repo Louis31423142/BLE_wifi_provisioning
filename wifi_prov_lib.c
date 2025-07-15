@@ -26,6 +26,7 @@ char ssid[33] = "";
 char password[64] = "";
 
 bool connection_status = false;
+int ble_attempt_limit = 50;
 
 static btstack_timer_source_t heartbeat;
 static btstack_packet_callback_registration_t hci_event_callback_registration;
@@ -40,9 +41,18 @@ static uint8_t adv_data[] = {
 
 static const uint8_t adv_data_len = sizeof(adv_data);
 
-// We're going to erase and reprogram a region 2000k from the start of flash.
-// Once done, we can access this at XIP_BASE + 2000k.
-#define FLASH_TARGET_OFFSET (2000 * 1024)
+// Define flash offset towards end of flash
+#ifndef PICO_FLASH_BANK_TOTAL_SIZE
+#define PICO_FLASH_BANK_TOTAL_SIZE (FLASH_SECTOR_SIZE * 2u)
+#endif
+
+#ifndef PICO_FLASH_BANK_STORAGE_OFFSET
+#if PICO_RP2350 && PICO_RP2350_A2_SUPPORTED 
+#define FLASH_TARGET_OFFSET (PICO_FLASH_SIZE_BYTES - FLASH_SECTOR_SIZE - PICO_FLASH_BANK_TOTAL_SIZE)
+#else
+#define FLASH_TARGET_OFFSET (PICO_FLASH_SIZE_BYTES - PICO_FLASH_BANK_TOTAL_SIZE)
+#endif
+#endif
 
 const uint8_t *flash_target_contents = (const uint8_t *) (XIP_BASE + FLASH_TARGET_OFFSET);
 
@@ -191,6 +201,12 @@ void read_credentials(void) {
     uint counter = 0;
     uint ssid_len = 0;
 
+    // first check if the flash page begins with FF - this indicates the flash has not yet been written to 
+    // so must initialise with empty write (otherwise crashes)
+    if (flash_target_contents[0] == 255) {
+        save_credentials("", "");
+    }
+
     //initialise temporary ssid and password as 1 bigger than max to ensure null termination
     char t_ssid[32] = {0};
     char t_password[63] = {0};
@@ -253,10 +269,7 @@ int start_ble_wifi_provisioning(void) {
     // turn on bluetooth!
     hci_power_control(HCI_POWER_ON);
 
-    //save_credentials("eldub", "12345678");
-
     read_credentials();
-    printf("read credentials \n");
     printf("%s\n", ssid);
     printf("%s\n", password);
 
@@ -269,25 +282,31 @@ int start_ble_wifi_provisioning(void) {
         connection_status = true;
     }
 
-    // If this fails, wait for user to provision credentials over BLE
+    // If this fails, wait for user to provision credentials over BLE until attempt limit reached
     if (connection_status == false) {
         cyw43_arch_disable_sta_mode();
+        int i = 0;
         while (connection_status == false) {
             cyw43_arch_enable_sta_mode();
             if (cyw43_arch_wifi_connect_timeout_ms(ssid, password, CYW43_AUTH_WPA2_AES_PSK, 5000)) { 
                 printf("failed to connect.\n");
                 printf("%s\n", ssid);
                 printf("%s\n", password);
+                i++;
+                if (i == ble_attempt_limit) {
+                    printf("Attempt limit reached! \n");
+                    break;
+                }
             } else {
                 printf("Connected.\n");
                 connection_status = true;
 
                 // since we have succesfully connected with these credentials, write to flash
                 save_credentials(ssid, password);
+                printf("succesful connection!\n");
             }
         }
     }
 
-    printf("succesful connection!\n");
     return 0;
 }
