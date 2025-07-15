@@ -88,8 +88,8 @@ void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint
             le_notification_enabled = 0;
             break;
         case ATT_EVENT_CAN_SEND_NOW:
-            att_server_notify(con_handle, ATT_CHARACTERISTIC_b1829813_e8ec_4621_b9b5_6c1be43fe223_01_VALUE_HANDLE, (uint8_t*)&ssid, sizeof(ssid));
-            att_server_notify(con_handle, ATT_CHARACTERISTIC_410f5077_9e81_4f3b_b888_bf435174fa58_01_VALUE_HANDLE, (uint8_t*)&password, sizeof(password));
+            att_server_notify(con_handle, ATT_CHARACTERISTIC_b1829813_e8ec_4621_b9b5_6c1be43fe223_01_VALUE_HANDLE, (uint8_t*)ssid, sizeof(ssid));
+            att_server_notify(con_handle, ATT_CHARACTERISTIC_410f5077_9e81_4f3b_b888_bf435174fa58_01_VALUE_HANDLE, (uint8_t*)password, sizeof(password));
             break;
         
         default:
@@ -191,9 +191,9 @@ void read_credentials(void) {
     uint counter = 0;
     uint ssid_len = 0;
 
-    //initialise ssid and password as 1 bigger than max to ensure null termination
-    char ssid[32] = {0};
-    char password[63] = {0};
+    //initialise temporary ssid and password as 1 bigger than max to ensure null termination
+    char t_ssid[32] = {0};
+    char t_password[63] = {0};
 
     // itterate through the flash and seperate ssid and password
     for (uint i = 0; i < FLASH_PAGE_SIZE; i++) {
@@ -210,18 +210,18 @@ void read_credentials(void) {
         }
         // otherwise just write ssid and password
         else if (counter == 0) {
-            ssid[i] = (char) flash_target_contents[i];
+            t_ssid[i] = (char) flash_target_contents[i];
         }
         else if (counter == 1) {
-            password[i - ssid_len - 1] = (char) flash_target_contents[i];
+            t_password[i - ssid_len - 1] = (char) flash_target_contents[i];
         }
     }
     // update global ssid and password
     memset(ssid, 0, strlen(ssid));
-    memcpy(ssid, ssid, strlen(ssid));
+    memcpy(ssid, t_ssid, strlen(t_ssid)+1);
 
     memset(password, 0, strlen(password));
-    memcpy(password, password, strlen(password));
+    memcpy(password, t_password, strlen(t_password)+1);
 }
 
 int start_ble_wifi_provisioning(void) {
@@ -253,7 +253,12 @@ int start_ble_wifi_provisioning(void) {
     // turn on bluetooth!
     hci_power_control(HCI_POWER_ON);
 
+    //save_credentials("eldub", "12345678");
+
     read_credentials();
+    printf("read credentials \n");
+    printf("%s\n", ssid);
+    printf("%s\n", password);
 
     // first attempt to connect using saved credentials
     cyw43_arch_enable_sta_mode();
