@@ -284,10 +284,8 @@ int start_ble_wifi_provisioning(void) {
 
     // If this fails, wait for user to provision credentials over BLE until attempt limit reached
     if (connection_status == false) {
-        cyw43_arch_disable_sta_mode();
         int i = 0;
         while (connection_status == false) {
-            cyw43_arch_enable_sta_mode();
             if (cyw43_arch_wifi_connect_timeout_ms(ssid, password, CYW43_AUTH_WPA2_AES_PSK, 5000)) { 
                 printf("failed to connect.\n");
                 printf("%s\n", ssid);
