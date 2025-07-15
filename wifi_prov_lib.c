@@ -20,12 +20,10 @@
 
 int le_notification_enabled;
 hci_con_handle_t con_handle;
-uint8_t ssid;
-uint8_t password;
 
 // max lengths of credentials + 1 to ensure null termination
-char ssid_word[33] = "";
-char password_word[64] = "";
+char ssid[33] = "";
+char password[64] = "";
 
 bool connection_status = false;
 
@@ -42,7 +40,7 @@ static uint8_t adv_data[] = {
 
 static const uint8_t adv_data_len = sizeof(adv_data);
 
-// We're going to erase and reprogram a region 256k from the start of flash.
+// We're going to erase and reprogram a region 2000k from the start of flash.
 // Once done, we can access this at XIP_BASE + 2000k.
 #define FLASH_TARGET_OFFSET (2000 * 1024)
 
@@ -124,25 +122,22 @@ int att_write_callback(hci_con_handle_t connection_handle, uint16_t att_handle, 
     con_handle = connection_handle;
     if (le_notification_enabled) {
         att_server_request_can_send_now_event(con_handle);
-        printf("event1\n");
         //This occurs when the client enables notification (the download button on nrf scanner)
     }
 
     // First characteristic (SSID)
     if (att_handle == ATT_CHARACTERISTIC_b1829813_e8ec_4621_b9b5_6c1be43fe223_01_VALUE_HANDLE){
         att_server_request_can_send_now_event(con_handle);
-        printf("event2\n");
-        memcpy(ssid_word, 0, strlen(ssid_word));
-        memcpy(ssid_word, buffer, buffer_size);
+        memset(ssid, 0, strlen(ssid));
+        memcpy(ssid, buffer, buffer_size);
         //This occurs when the client sends a write request to the ssid characteristic (up arrow on nrf scanner)
     }
 
     // Second characteristic (Password)
     if (att_handle == ATT_CHARACTERISTIC_410f5077_9e81_4f3b_b888_bf435174fa58_01_VALUE_HANDLE){
         att_server_request_can_send_now_event(con_handle);
-        printf("event3\n");
-        memcpy(password_word, 0, strlen(password_word));
-        memcpy(password_word, buffer, buffer_size);
+        memset(password, 0, strlen(password));
+        memcpy(password, buffer, buffer_size);
         //This occurs when the client sends a write request to the password characteristic (up arrow on nrf scanner)
     }
 
@@ -222,11 +217,11 @@ void read_credentials(void) {
         }
     }
     // update global ssid and password
-    memcpy(ssid_word, 0, strlen(ssid_word));
-    memcpy(ssid_word, ssid, strlen(ssid));
+    memset(ssid, 0, strlen(ssid));
+    memcpy(ssid, ssid, strlen(ssid));
 
-    memcpy(password_word, 0, strlen(password_word));
-    memcpy(password_word, password, strlen(password));
+    memset(password, 0, strlen(password));
+    memcpy(password, password, strlen(password));
 }
 
 int start_ble_wifi_provisioning(void) {
@@ -262,7 +257,7 @@ int start_ble_wifi_provisioning(void) {
 
     // first attempt to connect using saved credentials
     cyw43_arch_enable_sta_mode();
-    if (cyw43_arch_wifi_connect_timeout_ms(ssid_word, password_word, CYW43_AUTH_WPA2_AES_PSK, 10000)) { 
+    if (cyw43_arch_wifi_connect_timeout_ms(ssid, password, CYW43_AUTH_WPA2_AES_PSK, 10000)) { 
         printf("failed to connect with saved credentials \n");
     } else {
         printf("Connected.\n");
@@ -274,16 +269,16 @@ int start_ble_wifi_provisioning(void) {
         cyw43_arch_disable_sta_mode();
         while (connection_status == false) {
             cyw43_arch_enable_sta_mode();
-            if (cyw43_arch_wifi_connect_timeout_ms(ssid_word, password_word, CYW43_AUTH_WPA2_AES_PSK, 5000)) { 
+            if (cyw43_arch_wifi_connect_timeout_ms(ssid, password, CYW43_AUTH_WPA2_AES_PSK, 5000)) { 
                 printf("failed to connect.\n");
-                printf("%s\n", ssid_word);
-                printf("%s\n", password_word);
+                printf("%s\n", ssid);
+                printf("%s\n", password);
             } else {
                 printf("Connected.\n");
                 connection_status = true;
 
                 // since we have succesfully connected with these credentials, write to flash
-                save_credentials(ssid_word, password_word);
+                save_credentials(ssid, password);
             }
         }
     }

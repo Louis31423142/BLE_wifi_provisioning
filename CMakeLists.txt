@@ -60,7 +60,6 @@ add_executable(wifi_provisioning_new
 target_link_libraries(wifi_provisioning_new
     pico_stdlib
     wifi_prov_lib
-    pico_lwip_iperf
     )
 target_include_directories(wifi_provisioning_new PRIVATE
     ${CMAKE_CURRENT_LIST_DIR} # For btstack config
