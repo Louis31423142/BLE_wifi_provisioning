@@ -286,7 +286,7 @@ int start_ble_wifi_provisioning(void) {
     if (connection_status == false) {
         int i = 0;
         while (connection_status == false) {
-            if (cyw43_arch_wifi_connect_timeout_ms(ssid, password, CYW43_AUTH_WPA2_AES_PSK, 5000)) { 
+            if (cyw43_arch_wifi_connect_timeout_ms(ssid, password, CYW43_AUTH_WPA2_AES_PSK, 10000)) { 
                 printf("failed to connect.\n");
                 printf("%s\n", ssid);
                 printf("%s\n", password);
