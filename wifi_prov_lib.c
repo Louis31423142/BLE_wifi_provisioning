@@ -26,7 +26,6 @@ char ssid[33] = "";
 char password[64] = "";
 
 bool connection_status = false;
-int ble_attempt_limit = 50;
 
 static btstack_timer_source_t heartbeat;
 static btstack_packet_callback_registration_t hci_event_callback_registration;
@@ -240,7 +239,8 @@ void read_credentials(void) {
     memcpy(password, t_password, strlen(t_password)+1);
 }
 
-int start_ble_wifi_provisioning(void) {
+// this function carries out the BLE credential provisioning and also wifi connection
+int start_ble_wifi_provisioning(int ble_timeout_ms) {
     stdio_init_all();
 
     // initialize CYW43 driver architecture (will enable BT if/because CYW43_ENABLE_BLUETOOTH == 1)
@@ -270,41 +270,32 @@ int start_ble_wifi_provisioning(void) {
     hci_power_control(HCI_POWER_ON);
 
     read_credentials();
-    printf("%s\n", ssid);
-    printf("%s\n", password);
+    printf("Current saved SSID: %s\n", ssid);
+    printf("Current saved password: %s\n", password);
 
     // first attempt to connect using saved credentials
     cyw43_arch_enable_sta_mode();
-    if (cyw43_arch_wifi_connect_timeout_ms(ssid, password, CYW43_AUTH_WPA2_AES_PSK, 10000)) { 
+    if (cyw43_arch_wifi_connect_timeout_ms(ssid, password, CYW43_AUTH_WPA2_AES_PSK, 5000)) { 
         printf("failed to connect with saved credentials \n");
     } else {
         printf("Connected.\n");
         connection_status = true;
     }
 
-    // If this fails, wait for user to provision credentials over BLE until attempt limit reached
+    // If this fails, wait for user to provision credentials over BLE until timeout
+    int result;
     if (connection_status == false) {
-        int i = 0;
-        while (connection_status == false) {
-            if (cyw43_arch_wifi_connect_timeout_ms(ssid, password, CYW43_AUTH_WPA2_AES_PSK, 10000)) { 
-                printf("failed to connect.\n");
-                printf("%s\n", ssid);
-                printf("%s\n", password);
-                i++;
-                if (i == ble_attempt_limit) {
-                    printf("Attempt limit reached! \n");
-                    break;
-                }
-            } else {
-                printf("Connected.\n");
-                connection_status = true;
-
-                // since we have succesfully connected with these credentials, write to flash
-                save_credentials(ssid, password);
-                printf("succesful connection!\n");
+        while (result != -2) {
+            result = cyw43_arch_wifi_connect_timeout_ms(ssid, password, CYW43_AUTH_WPA2_AES_PSK, ble_timeout_ms);
+            // success
+            printf("%d\n", result);
+            if (result == 0) {
+                printf("Connected\n");
+                break;
             }
         }
     }
-
+    // once finished, turn off bluetooth
+    hci_power_control(HCI_POWER_OFF);
     return 0;
 }

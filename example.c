@@ -3,6 +3,8 @@
 
 
 int main(void) {
-    start_ble_wifi_provisioning();
+    // if unable to connect with saved ssid and password, waits 5 seconds
+    // for new credentials to be provisioned over BLE
+    start_ble_wifi_provisioning(15000);
     printf("finished provisioning\n");
 }
