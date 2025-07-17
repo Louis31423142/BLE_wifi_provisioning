@@ -91,17 +91,7 @@ void sm_packet_handler (uint8_t packet_type, uint16_t channel, uint8_t *packet, 
                     printf("Connection complete\n");
                     con_handle = gap_subevent_le_connection_complete_get_connection_handle(packet);
                     UNUSED(con_handle);
-
-                    // for testing, choose one of the following actions
-
-                    // manually start pairing
                     sm_request_pairing(con_handle);
-
-                    // gatt client request to authenticated characteristic in sm_pairing_central (short cut, uses hard-coded value handle)
-                    // gatt_client_read_value_of_characteristic_using_value_handle(&packet_handler, con_handle, 0x0009);
-
-                    // general gatt client request to trigger mandatory authentication
-                    //gatt_client_discover_primary_services(&packet_handler, con_handle);
                     break;
                 default:
                     break;
@@ -382,7 +372,7 @@ void read_credentials(void) {
 }
 
 // this function carries out the BLE credential provisioning and also wifi connection
-int start_ble_wifi_provisioning(int ble_timeout_ms, int passkey) {
+int start_ble_wifi_provisioning(int ble_timeout_ms) {
     stdio_init_all();
 
     // initialize CYW43 driver architecture (will enable BT if/because CYW43_ENABLE_BLUETOOTH == 1)
@@ -434,15 +424,22 @@ int start_ble_wifi_provisioning(int ble_timeout_ms, int passkey) {
     }
 
     // If this fails, wait for user to provision credentials over BLE until timeout
+    // cyw43_arch_wifi_connect_timeout_ms returns -2 for timeout and -7 for incorrect password
+    // wish to keep trying if password incorrect 
     int result;
     if (connection_status == false) {
-        while (result != -2) {
+        while (true) {
             result = cyw43_arch_wifi_connect_timeout_ms(ssid, password, CYW43_AUTH_WPA2_AES_PSK, ble_timeout_ms);
-            // success
-            printf("%d\n", result);
-            if (result == 0) {
-                printf("Connected\n");
+            if (result == -2) {
+                panic("Timed out - failed provisioning! \n");
+            } else if (result == 0) {
+                connection_status = true;
+                printf("Succesfully provisioned credentials through BLE! \n");
                 break;
+            } else if (result == -7) {
+                printf("Incorrect password - retrying \n");
+            } else {
+                panic("Connection error - failed provisioning! \n");
             }
         }
     }
