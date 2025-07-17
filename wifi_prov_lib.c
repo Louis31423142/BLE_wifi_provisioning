@@ -15,6 +15,8 @@
 #include "pico/flash.h"
 #include "hardware/flash.h"
 
+#include <string.h>
+
 #define HEARTBEAT_PERIOD_MS 1000
 #define APP_AD_FLAGS 0x06
 
@@ -28,7 +30,9 @@ char password[64] = "";
 bool connection_status = false;
 
 static btstack_timer_source_t heartbeat;
+
 static btstack_packet_callback_registration_t hci_event_callback_registration;
+static btstack_packet_callback_registration_t sm_event_callback_registration;
 
 static uint8_t adv_data[] = {
     // Flags general discoverable
@@ -68,6 +72,131 @@ static void call_flash_range_program(void *param) {
     flash_range_program(offset, data, FLASH_PAGE_SIZE);
 }
 
+// Security Manager Packet Handler 
+void sm_packet_handler (uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size){
+    UNUSED(channel);
+    UNUSED(size);
+
+    if (packet_type != HCI_EVENT_PACKET) return;
+
+    hci_con_handle_t con_handle;
+    bd_addr_t addr;
+    bd_addr_type_t addr_type;
+    uint8_t status;
+
+    switch (hci_event_packet_get_type(packet)) {
+        case HCI_EVENT_META_GAP:
+            switch (hci_event_gap_meta_get_subevent_code(packet)) {
+                case GAP_SUBEVENT_LE_CONNECTION_COMPLETE:
+                    printf("Connection complete\n");
+                    con_handle = gap_subevent_le_connection_complete_get_connection_handle(packet);
+                    UNUSED(con_handle);
+
+                    // for testing, choose one of the following actions
+
+                    // manually start pairing
+                    sm_request_pairing(con_handle);
+
+                    // gatt client request to authenticated characteristic in sm_pairing_central (short cut, uses hard-coded value handle)
+                    // gatt_client_read_value_of_characteristic_using_value_handle(&packet_handler, con_handle, 0x0009);
+
+                    // general gatt client request to trigger mandatory authentication
+                    //gatt_client_discover_primary_services(&packet_handler, con_handle);
+                    break;
+                default:
+                    break;
+            }
+            break;
+        case SM_EVENT_JUST_WORKS_REQUEST:
+            printf("Just Works requested\n");
+            sm_just_works_confirm(sm_event_just_works_request_get_handle(packet));
+            break;
+        case SM_EVENT_IDENTITY_CREATED:
+            sm_event_identity_created_get_identity_address(packet, addr);
+            printf("Identity created: type %u address %s\n", sm_event_identity_created_get_identity_addr_type(packet), bd_addr_to_str(addr));
+            break;
+        case SM_EVENT_IDENTITY_RESOLVING_SUCCEEDED:
+            sm_event_identity_resolving_succeeded_get_identity_address(packet, addr);
+            printf("Identity resolved: type %u address %s\n", sm_event_identity_resolving_succeeded_get_identity_addr_type(packet), bd_addr_to_str(addr));
+            break;
+        case SM_EVENT_IDENTITY_RESOLVING_FAILED:
+            sm_event_identity_created_get_address(packet, addr);
+            printf("Identity resolving failed\n");
+            break;
+        case SM_EVENT_PAIRING_STARTED:
+            printf("Pairing started\n");
+            break;
+        case SM_EVENT_PAIRING_COMPLETE:
+            switch (sm_event_pairing_complete_get_status(packet)){
+                case ERROR_CODE_SUCCESS:
+                    printf("Pairing complete, success\n");
+                    break;
+                case ERROR_CODE_CONNECTION_TIMEOUT:
+                    printf("Pairing failed, timeout\n");
+                    break;
+                case ERROR_CODE_REMOTE_USER_TERMINATED_CONNECTION:
+                    printf("Pairing failed, disconnected\n");
+                    break;
+                case ERROR_CODE_AUTHENTICATION_FAILURE:
+                    printf("Pairing failed, authentication failure with reason = %u\n", sm_event_pairing_complete_get_reason(packet));
+                    break;
+                default:
+                    break;
+            }
+            break;
+        case SM_EVENT_REENCRYPTION_STARTED:
+            sm_event_reencryption_complete_get_address(packet, addr);
+            printf("Bonding information exists for addr type %u, identity addr %s -> re-encryption started\n",
+                   sm_event_reencryption_started_get_addr_type(packet), bd_addr_to_str(addr));
+            break;
+        case SM_EVENT_REENCRYPTION_COMPLETE:
+            switch (sm_event_reencryption_complete_get_status(packet)){
+                case ERROR_CODE_SUCCESS:
+                    printf("Re-encryption complete, success\n");
+                    break;
+                case ERROR_CODE_CONNECTION_TIMEOUT:
+                    printf("Re-encryption failed, timeout\n");
+                    break;
+                case ERROR_CODE_REMOTE_USER_TERMINATED_CONNECTION:
+                    printf("Re-encryption failed, disconnected\n");
+                    break;
+                case ERROR_CODE_PIN_OR_KEY_MISSING:
+                    printf("Re-encryption failed, bonding information missing\n\n");
+                    printf("Assuming remote lost bonding information\n");
+                    printf("Deleting local bonding information to allow for new pairing...\n");
+                    sm_event_reencryption_complete_get_address(packet, addr);
+                    addr_type = sm_event_reencryption_started_get_addr_type(packet);
+                    gap_delete_bonding(addr_type, addr);
+                    break;
+                default:
+                    break;
+            }
+            break;
+        case GATT_EVENT_QUERY_COMPLETE:
+            status = gatt_event_query_complete_get_att_status(packet);
+            switch (status){
+                case ATT_ERROR_INSUFFICIENT_ENCRYPTION:
+                    printf("GATT Query failed, Insufficient Encryption\n");
+                    break;
+                case ATT_ERROR_INSUFFICIENT_AUTHENTICATION:
+                    printf("GATT Query failed, Insufficient Authentication\n");
+                    break;
+                case ATT_ERROR_BONDING_INFORMATION_MISSING:
+                    printf("GATT Query failed, Bonding Information Missing\n");
+                    break;
+                case ATT_ERROR_SUCCESS:
+                    printf("GATT Query successful\n");
+                    break;
+                default:
+                    printf("GATT Query failed, status 0x%02x\n", gatt_event_query_complete_get_att_status(packet));
+                    break;
+            }
+            break;
+        default:
+            break;
+    }
+}
+
 void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size) {
     UNUSED(size);
     UNUSED(channel);
@@ -76,6 +205,19 @@ void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint
 
     uint8_t event_type = hci_event_packet_get_type(packet);
     switch(event_type){
+        case HCI_EVENT_META_GAP:
+            switch (hci_event_gap_meta_get_subevent_code(packet)) {
+                case GAP_SUBEVENT_LE_CONNECTION_COMPLETE:
+                    printf("Connection complete\n");
+                    con_handle = gap_subevent_le_connection_complete_get_connection_handle(packet);
+                    UNUSED(con_handle);
+                    sm_request_pairing(con_handle);
+                    break;
+                default:
+                    break;
+            }
+            break;
+
         case BTSTACK_EVENT_STATE:
             if (btstack_event_state_get_state(packet) != HCI_STATE_WORKING) return;
             gap_local_bd_addr(local_addr);
@@ -137,7 +279,7 @@ int att_write_callback(hci_con_handle_t connection_handle, uint16_t att_handle, 
     // First characteristic (SSID)
     if (att_handle == ATT_CHARACTERISTIC_b1829813_e8ec_4621_b9b5_6c1be43fe223_01_VALUE_HANDLE){
         att_server_request_can_send_now_event(con_handle);
-        memset(ssid, 0, strlen(ssid));
+        memset(ssid, 0, sizeof(ssid));
         memcpy(ssid, buffer, buffer_size);
         //This occurs when the client sends a write request to the ssid characteristic (up arrow on nrf scanner)
     }
@@ -145,7 +287,7 @@ int att_write_callback(hci_con_handle_t connection_handle, uint16_t att_handle, 
     // Second characteristic (Password)
     if (att_handle == ATT_CHARACTERISTIC_410f5077_9e81_4f3b_b888_bf435174fa58_01_VALUE_HANDLE){
         att_server_request_can_send_now_event(con_handle);
-        memset(password, 0, strlen(password));
+        memset(password, 0, sizeof(password));
         memcpy(password, buffer, buffer_size);
         //This occurs when the client sends a write request to the password characteristic (up arrow on nrf scanner)
     }
@@ -207,8 +349,8 @@ void read_credentials(void) {
     }
 
     //initialise temporary ssid and password as 1 bigger than max to ensure null termination
-    char t_ssid[32] = {0};
-    char t_password[63] = {0};
+    char t_ssid[33] = {0};
+    char t_password[64] = {0};
 
     // itterate through the flash and seperate ssid and password
     for (uint i = 0; i < FLASH_PAGE_SIZE; i++) {
@@ -232,15 +374,15 @@ void read_credentials(void) {
         }
     }
     // update global ssid and password
-    memset(ssid, 0, strlen(ssid));
-    memcpy(ssid, t_ssid, strlen(t_ssid)+1);
+    memset(ssid, 0, sizeof(ssid));
+    memcpy(ssid, t_ssid, sizeof(t_ssid));
 
-    memset(password, 0, strlen(password));
-    memcpy(password, t_password, strlen(t_password)+1);
+    memset(password, 0, sizeof(password));
+    memcpy(password, t_password, sizeof(t_password));
 }
 
 // this function carries out the BLE credential provisioning and also wifi connection
-int start_ble_wifi_provisioning(int ble_timeout_ms) {
+int start_ble_wifi_provisioning(int ble_timeout_ms, int passkey) {
     stdio_init_all();
 
     // initialize CYW43 driver architecture (will enable BT if/because CYW43_ENABLE_BLUETOOTH == 1)
@@ -257,6 +399,15 @@ int start_ble_wifi_provisioning(int ble_timeout_ms) {
     // inform about BTstack state
     hci_event_callback_registration.callback = &packet_handler;
     hci_add_event_handler(&hci_event_callback_registration);
+
+    // secure manager register handler
+    sm_event_callback_registration.callback = &sm_packet_handler;
+    sm_add_event_handler(&sm_event_callback_registration);
+
+    // configure secure BLE (Just works) (legacy pairing)
+    gatt_client_set_required_security_level(LEVEL_2);
+    sm_set_io_capabilities(IO_CAPABILITY_NO_INPUT_NO_OUTPUT);
+    sm_set_authentication_requirements(0);
 
     // register for ATT event
     att_server_register_packet_handler(packet_handler);

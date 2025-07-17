@@ -26,6 +26,9 @@ async def main(ssid, password):
     async with BleakClient(address) as client:
         print(f"Connected: {client.is_connected}")
 
+        await client.pair()
+        print("Paired...")
+
         print("Writing SSID...")
         await client.write_gatt_char(SSID_CHARACTERISTIC, ssid.encode("utf-8"), response=True)
         await asyncio.sleep(1.0)
